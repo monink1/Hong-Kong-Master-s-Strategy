@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # 1. MySQL 服务（保持基础配置，仅补充注释）
+  mysql-test:
+    image: mysql:8.0
+    container_name: mysql-life  # 容器名（外部访问用）
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456  # 数据库root密码（前后端需统一）
+      MYSQL_DATABASE: mysql-life   # 自动创建的数据库名（后端需连接这个库）
+      MYSQL_CHARSET: utf8mb4       # 字符集（支持中文，避免乱码）
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3308:3306"  # 宿主机端口:容器内端口（宿主机用Workbench连接时用3308）
+    volumes:
+      - mysql-data:/var/lib/mysql  # 数据持久化（容器删除后数据不丢失）
+    restart: always
+    healthcheck:  # 健康检查（确保MySQL就绪后才允许后端连接）
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network  # 加入统一网络
+
+  # 2. 后端服务（核心修复：数据库配置与MySQL服务对齐）
+  backend-test:
+    build: D:\lifeway\backend  # 你的后端代码实际路径（不要改）
+    container_name: backend
+    ports:
+      - "5000:5000"  # 后端接口端口（宿主机访问用localhost:5000）
+    depends_on:
+      mysql-test:
+        condition: service_healthy  # 等待MySQL健康后再启动（避免连接超时）
+    restart: always
+    environment:
+      # 后端连接MySQL的关键配置（覆盖app.py的默认值，确保与MySQL服务一致）
+      MYSQL_HOST: mysql-test        # 用MySQL服务名通信（必须与services下的MySQL服务名一致）
+      MYSQL_PORT: 3306             # 容器内MySQL端口（不是宿主机的3308）
+      MYSQL_USER: root             # 数据库用户名（与MySQL一致）
+      MYSQL_PASSWORD: 123456       # 数据库密码（与MySQL的MYSQL_ROOT_PASSWORD一致）
+      MYSQL_DB: mysql_life         # 要连接的数据库名（与MySQL的MYSQL_DATABASE一致）
+    networks:
+      - app-network  # 与MySQL同网络，确保能通信
+
+  # 3. 前端服务（修复：确保依赖后端启动，且网络互通）
+  frontend-test:
+    build: D:\lifeway\frontend  # 你的前端代码实际路径（不要改）
+    container_name: frontend
+    ports:
+      - "8080:80"  # 前端访问端口（宿主机访问用localhost:8080）
+    depends_on:
+      backend-test:
+        condition: service_started  # 等待后端启动后再启动前端
+    restart: always
+    networks:
+      - app-network  # 与后端同网络（前端容器内访问后端用服务名backend-test）
+
+# 统一网络（所有服务加入此网络，确保容器间能通过服务名通信）
+networks:
+  app-network:
+    driver: bridge
+
+# 数据卷（MySQL数据持久化，避免容器删除后数据丢失）
+volumes:
+  mysql-data:
